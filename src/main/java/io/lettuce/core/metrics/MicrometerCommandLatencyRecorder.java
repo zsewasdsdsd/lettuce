@@ -51,8 +51,6 @@ public class MicrometerCommandLatencyRecorder implements CommandLatencyRecorder 
 
     static final String METRIC_QUEUEING = "lettuce.command.queueing";
 
-    static final String METRIC_END_TO_END = "lettuce.command.endtoend";
-
     private final MeterRegistry meterRegistry;
 
     private final MicrometerOptions options;
@@ -62,8 +60,6 @@ public class MicrometerCommandLatencyRecorder implements CommandLatencyRecorder 
     private final Map<CommandLatencyId, Timer> firstResponseTimers = new ConcurrentHashMap<>();
 
     private final Map<CommandLatencyId, Timer> queueingTimers = new ConcurrentHashMap<>();
-
-    private final Map<CommandLatencyId, Timer> endToEndTimers = new ConcurrentHashMap<>();
 
     /**
      * Create a new {@link MicrometerCommandLatencyRecorder} instance given {@link MeterRegistry} and {@link MicrometerOptions}.
@@ -91,7 +87,7 @@ public class MicrometerCommandLatencyRecorder implements CommandLatencyRecorder 
 
     @Override
     public void recordCommandQueueLatency(SocketAddress local, SocketAddress remote, RedisCommand<?, ?, ?> command,
-            long queueLatency, long endToEndLatency) {
+            long queueLatency) {
 
         if (!isQueueLatencyEnabled() || !isCommandEnabled(command)) {
             return;
@@ -100,13 +96,8 @@ public class MicrometerCommandLatencyRecorder implements CommandLatencyRecorder 
         CommandLatencyId id = createId(local, remote, command.getType());
         queueingTimers
                 .computeIfAbsent(id,
-                        it -> extraTimer(it, METRIC_QUEUEING, "Latency between endpoint acceptance and first command send"))
+                        it -> extraTimer(it, METRIC_QUEUEING, "Time between endpoint acceptance and each command dispatch attempt"))
                 .record(queueLatency, TimeUnit.NANOSECONDS);
-        endToEndTimers
-                .computeIfAbsent(id,
-                        it -> extraTimer(it, METRIC_END_TO_END,
-                                "Latency between endpoint acceptance and final response decode"))
-                .record(endToEndLatency, TimeUnit.NANOSECONDS);
     }
 
     @Override

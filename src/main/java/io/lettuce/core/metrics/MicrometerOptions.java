@@ -44,7 +44,7 @@ public class MicrometerOptions {
     public static final boolean DEFAULT_HISTOGRAM = false;
 
     /**
-     * Default setting for queueing and end-to-end latency metrics: {@code false}.
+     * Default setting for per-attempt queueing latency metrics: {@code false}.
      *
      * @since 7.9
      */
@@ -191,12 +191,11 @@ public class MicrometerOptions {
         }
 
         /**
-         * Enable queueing and end-to-end latency metrics in addition to network latency metrics. Queueing measures the time
-         * between endpoint acceptance and the first send. End-to-end measures the time between endpoint acceptance and final
-         * response decode. Enabling these metrics adds per-command timing and two additional timers per command/address
-         * combination. Defaults to {@code false}. See {@link MicrometerOptions#DEFAULT_QUEUE_LATENCY}.
+         * Enable per-attempt queueing latency metrics in addition to network latency metrics. Queueing measures the time
+         * between endpoint acceptance and each dispatch attempt. Enabling this metric adds one timer per
+         * command/address combination. Defaults to {@code false}. See {@link MicrometerOptions#DEFAULT_QUEUE_LATENCY}.
          *
-         * @param queueLatency {@code true} to record queueing and end-to-end latencies
+         * @param queueLatency {@code true} to record per-attempt queueing latency
          * @return this {@link Builder}.
          * @since 7.9
          */
@@ -332,10 +331,10 @@ public class MicrometerOptions {
     }
 
     /**
-     * Returns whether queueing and end-to-end latency metrics are configured. The recorder must also be enabled to record these
+     * Returns whether per-attempt queueing latency metrics are configured. The recorder must also be enabled to record these
      * metrics.
      *
-     * @return {@code true} if queueing and end-to-end latency metrics are configured
+     * @return {@code true} if per-attempt queueing latency metrics are configured
      * @since 7.9
      */
     public boolean isQueueLatencyEnabled() {

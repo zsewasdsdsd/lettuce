@@ -28,7 +28,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
+import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
@@ -95,7 +97,11 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint, PushHandle
 
     private final Queue<RedisCommand<?, ?, ?>> commandBuffer;
 
-    private final boolean queueLatencyMetricsEnabled;
+    /**
+     * Per-attempt timestamps live on the endpoint, never on the commands. Weak keys also avoid retaining a cancelled
+     * command if it is removed from a pending buffer without reaching the channel.
+     */
+    private final Map<RedisCommand<?, ?, ?>, Long> queueAcceptedAt;
 
     private final boolean boundedQueues;
 
@@ -147,7 +153,8 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint, PushHandle
         this.clientOptions = clientOptions;
         this.clientResources = clientResources;
         CommandLatencyRecorder recorder = clientResources.commandLatencyRecorder();
-        this.queueLatencyMetricsEnabled = recorder != null && recorder.isQueueLatencyEnabled();
+        this.queueAcceptedAt = recorder != null && recorder.isQueueLatencyEnabled()
+                ? Collections.synchronizedMap(new WeakHashMap<>()) : null;
         this.reliability = clientOptions.isAutoReconnect() ? Reliability.AT_LEAST_ONCE : Reliability.AT_MOST_ONCE;
         this.replayFilter = clientOptions.getReplayFilter();
         this.disconnectedBuffer = LettuceFactories.newConcurrentQueue(clientOptions.getRequestQueueSize());
@@ -160,6 +167,14 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint, PushHandle
     @Override
     public void setConnectionFacade(ConnectionFacade connectionFacade) {
         this.connectionFacade = connectionFacade;
+    }
+
+    /**
+     * Consume the timestamp once the handler dispatches an accepted attempt. Replay after reconnect has no new timestamp.
+     * A redirect calls write() again and therefore creates a fresh timestamp for the next attempt.
+     */
+    Long consumeQueueingTimestamp(RedisCommand<?, ?, ?> command) {
+        return queueAcceptedAt == null ? null : queueAcceptedAt.remove(command);
     }
 
     @Override
@@ -198,15 +213,16 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint, PushHandle
             return command;
         }
 
-        if (queueLatencyMetricsEnabled) {
-            AsyncCommand.markEnqueued(command, System.nanoTime());
-        }
-
+        long acceptedAt = queueAcceptedAt == null ? 0 : System.nanoTime();
         try {
             sharedLock.incrementWriters();
 
             if (inActivation) {
                 command = processActivationCommand(command);
+            }
+
+            if (queueAcceptedAt != null) {
+                queueAcceptedAt.put(command, acceptedAt);
             }
 
             if (autoFlushCommands) {
@@ -243,16 +259,18 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint, PushHandle
             return (Collection<RedisCommand<K, V, ?>>) commands;
         }
 
-        if (queueLatencyMetricsEnabled) {
-            long acceptedAt = System.nanoTime();
-            commands.forEach(command -> AsyncCommand.markEnqueued(command, acceptedAt));
-        }
-
+        long acceptedAt = queueAcceptedAt == null ? 0 : System.nanoTime();
         try {
             sharedLock.incrementWriters();
 
             if (inActivation) {
                 commands = processActivationCommands(commands);
+            }
+
+            if (queueAcceptedAt != null) {
+                for (RedisCommand<K, V, ?> command : commands) {
+                    queueAcceptedAt.put(command, acceptedAt);
+                }
             }
 
             if (autoFlushCommands) {
